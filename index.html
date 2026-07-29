@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en-CA">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crazy Cravings — Despesas do Negócio</title>
+
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+<!-- Charts -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+
+<!-- PDF -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+
+<style>
+:root{
+  --primary:#dd0143;
+  --primary-dark:#a80132;
+  --success:#16a34a;
+  --danger:#dc2626;
+  --warning:#d97706;
+  --bg:#f4f6fb;
+  --card-bg:#ffffff;
+  --text:#1e293b;
+  --text-muted:#64748b;
+  --border:#e2e8f0;
+  --radius:14px;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{
+  font-family:'Segoe UI', system-ui, -apple-system, sans-serif;
+  background:var(--bg);
+  color:var(--text);
+  min-height:100vh;
+}
+
+/* ---------- LOGIN ---------- */
+#loginScreen{
+  min-height:100vh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background:linear-gradient(135deg,var(--primary),#1e3a8a);
+}
+.login-box{
+  background:var(--card-bg);
+  padding:40px;
+  border-radius:var(--radius);
+  box-shadow:0 20px 50px rgba(0,0,0,.25);
+  width:100%;
+  max-width:380px;
+  text-align:center;
+}
+.login-box h1{font-size:22px;margin-bottom:6px;}
+.login-box p{color:var(--text-muted);font-size:14px;margin-bottom:24px;}
+.login-box input{
+  width:100%;padding:12px 14px;border:1px solid var(--border);
+  border-radius:10px;font-size:15px;margin-bottom:14px;
+}
+.login-box button{
+  width:100%;padding:12px;border:none;border-radius:10px;
+  background:var(--primary);color:#fff;font-size:15px;font-weight:600;
+  cursor:pointer;transition:.2s;
+}
+.login-box button:hover{background:var(--primary-dark);}
+#loginError{color:var(--danger);font-size:13px;margin-top:10px;min-height:16px;}
+
+/* ---------- APP LAYOUT ---------- */
+#app{display:none;min-height:100vh;}
+header.topbar{
+  background:var(--card-bg);
+  border-bottom:1px solid var(--border);
+  padding:16px 24px;
+  display:flex;align-items:center;justify-content:space-between;
+  position:sticky;top:0;z-index:50;
+}
+.login-logo{width:72px;height:72px;border-radius:16px;margin-bottom:14px;object-fit:cover;}
+header.topbar h1{font-size:19px;font-weight:700;color:var(--primary);display:flex;align-items:center;gap:10px;}
+.header-logo{width:32px;height:32px;border-radius:8px;object-fit:cover;}
+header.topbar .actions{display:flex;gap:10px;align-items:center;}
+.btn-logout{
+  background:none;border:1px solid var(--border);padding:8px 14px;
+  border-radius:8px;cursor:pointer;font-size:13px;color:var(--text-muted);
+}
+
+nav.tabs{
+  display:flex;gap:4px;background:var(--card-bg);
+  padding:0 24px;border-bottom:1px solid var(--border);
+  overflow-x:auto;
+}
+nav.tabs button{
+  padding:14px 20px;border:none;background:none;cursor:pointer;
+  font-size:14px;font-weight:600;color:var(--text-muted);
+  border-bottom:3px solid transparent;white-space:nowrap;
+  transition:.2s;
+}
+nav.tabs button.active{color:var(--primary);border-bottom-color:var(--primary);}
+nav.tabs button:hover{color:var(--primary);}
+
+main{padding:24px;max-width:1200px;margin:0 auto;}
+.tab-content{display:none;animation:fadeIn .25s ease;}
+.tab-content.active{display:block;}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+
+/* ---------- CARDS / KPIs ---------- */
+.kpi-grid{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+  gap:16px;margin-bottom:24px;
+}
+.kpi-card{
+  background:var(--card-bg);border-radius:var(--radius);padding:20px;
+  box-shadow:0 1px 3px rgba(0,0,0,.06);border:1px solid var(--border);
+}
+.kpi-card .label{font-size:13px;color:var(--text-muted);margin-bottom:6px;}
+.kpi-card .value{font-size:24px;font-weight:700;}
+.kpi-card .value.danger{color:var(--danger);}
+.kpi-card .value.success{color:var(--success);}
+.kpi-card .sub{font-size:12px;color:var(--text-muted);margin-top:4px;}
+.kpi-card .sub.up{color:var(--danger);}
+.kpi-card .sub.down{color:var(--success);}
+
+.charts-grid{
+  display:grid;grid-template-columns:1.3fr 1fr;gap:16px;margin-bottom:24px;
+}
+@media(max-width:900px){.charts-grid{grid-template-columns:1fr;}}
+.chart-card{
+  background:var(--card-bg);border-radius:var(--radius);padding:20px;
+  border:1px solid var(--border);
+}
+.chart-card h3{font-size:15px;margin-bottom:16px;color:var(--text);}
+.chart-wrap{position:relative;height:280px;}
+
+/* ---------- FORM (cadastro) ---------- */
+.form-card{
+  background:var(--card-bg);border-radius:var(--radius);padding:28px;
+  border:1px solid var(--border);max-width:640px;margin:0 auto;
+}
+.form-card h2{margin-bottom:4px;font-size:19px;}
+.form-card p.hint{color:var(--text-muted);font-size:13px;margin-bottom:22px;}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;}
+@media(max-width:560px){.form-row{grid-template-columns:1fr;}}
+.field{display:flex;flex-direction:column;gap:6px;}
+.field label{font-size:13px;font-weight:600;color:var(--text-muted);}
+.field input,.field select{
+  padding:10px 12px;border:1px solid var(--border);border-radius:8px;
+  font-size:14px;background:#fff;
+}
+.field-full{grid-column:1/-1;}
+.recurring-field{
+  background:#f8fafc;border:1px dashed var(--border);border-radius:10px;padding:14px 16px;
+}
+.month-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
+@media(max-width:480px){.month-grid{grid-template-columns:repeat(3,1fr);}}
+.month-chip{
+  display:flex;align-items:center;justify-content:center;padding:10px 6px;
+  border:1px solid var(--border);border-radius:8px;font-size:13px;font-weight:600;
+  cursor:pointer;background:#fff;color:var(--text-muted);transition:.15s;user-select:none;
+}
+.month-chip:hover{border-color:var(--primary);color:var(--primary);}
+.month-chip.selected{background:var(--primary);color:#fff;border-color:var(--primary);}
+.recurring-toggle{
+  display:flex;align-items:center;gap:10px;cursor:pointer;font-size:14px;font-weight:600;color:var(--text);
+}
+.recurring-toggle input{width:auto;}
+#recurringOptions{margin-top:10px;}
+.category-manager{display:flex;gap:8px;margin-top:6px;flex-wrap:wrap;}
+.cat-chip{
+  padding:4px 10px;border-radius:20px;font-size:12px;
+  background:#eef2ff;color:var(--primary);display:flex;align-items:center;gap:6px;
+}
+.cat-chip button{background:none;border:none;color:var(--danger);cursor:pointer;font-size:13px;line-height:1;}
+.btn-primary{
+  width:100%;padding:13px;background:var(--primary);color:#fff;border:none;
+  border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;margin-top:10px;
+}
+.btn-primary:hover{background:var(--primary-dark);}
+.btn-secondary{
+  padding:9px 16px;background:#eef2ff;color:var(--primary);border:none;
+  border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;
+}
+#formMsg{text-align:center;font-size:13px;margin-top:10px;min-height:16px;}
+
+/* ---------- LISTA / RELATÓRIOS ---------- */
+.filters-bar{
+  background:var(--card-bg);border-radius:var(--radius);padding:18px 20px;
+  border:1px solid var(--border);margin-bottom:20px;
+  display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;
+}
+.filters-bar .field{min-width:150px;}
+.period-tabs{display:flex;gap:6px;background:#eef2ff;padding:4px;border-radius:9px;}
+.period-tabs button{
+  padding:8px 14px;border:none;background:none;border-radius:7px;
+  font-size:13px;font-weight:600;color:var(--text-muted);cursor:pointer;
+}
+.period-tabs button.active{background:var(--primary);color:#fff;}
+
+.custom-range-fields{display:flex;gap:10px;align-items:flex-end;}
+.month-year-group{display:flex;gap:6px;}
+.month-year-group .my-month{min-width:130px;}
+.month-year-group .my-year{min-width:85px;}
+.btn-winter{
+  padding:9px 16px;border-radius:8px;border:1px solid #93c5fd;background:#eff6ff;
+  color:#1d4ed8;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;
+}
+.btn-winter:hover{background:#dbeafe;}
+.export-btns{display:flex;gap:8px;margin-left:auto;}
+.export-btns button{
+  padding:9px 16px;border-radius:8px;border:1px solid var(--border);
+  background:#fff;font-size:13px;font-weight:600;cursor:pointer;display:flex;
+  align-items:center;gap:6px;
+}
+.export-btns button:hover{background:#f8fafc;}
+
+table.tx-table{width:100%;border-collapse:collapse;background:var(--card-bg);
+  border-radius:var(--radius);overflow:hidden;border:1px solid var(--border);}
+table.tx-table th{
+  background:#f8fafc;text-align:left;padding:12px 16px;font-size:12px;
+  color:var(--text-muted);text-transform:uppercase;letter-spacing:.03em;
+  border-bottom:1px solid var(--border);
+}
+table.tx-table td{padding:12px 16px;font-size:14px;border-bottom:1px solid var(--border);}
+table.tx-table tr:last-child td{border-bottom:none;}
+table.tx-table td.valor{font-weight:600;color:var(--danger);text-align:right;}
+.cat-badge{
+  display:inline-flex;align-items:center;gap:6px;padding:3px 10px;
+  border-radius:20px;font-size:12px;background:#f1f5f9;
+}
+.btn-del{background:none;border:none;color:var(--danger);cursor:pointer;font-size:15px;}
+.accounts-grid{
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;
+}
+.account-card{
+  background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;
+  cursor:pointer;transition:.15s;
+}
+.account-card:hover{box-shadow:0 4px 14px rgba(0,0,0,.08);transform:translateY(-2px);}
+.account-icon{font-size:22px;margin-bottom:6px;}
+.account-name{font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px;}
+.account-total{font-size:17px;font-weight:700;color:var(--danger);}
+.account-count{font-size:12px;color:var(--text-muted);margin-top:2px;}
+.btn-edit{background:none;border:none;color:var(--primary);cursor:pointer;font-size:14px;margin-right:4px;}
+.modal-overlay{
+  display:none;position:fixed;inset:0;background:rgba(15,23,42,.5);
+  z-index:200;align-items:center;justify-content:center;padding:20px;
+}
+.modal-overlay.open{display:flex;}
+.modal-box{
+  background:#fff;border-radius:16px;padding:28px;max-width:480px;width:100%;
+  max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3);
+}
+.modal-box h2{font-size:18px;margin-bottom:16px;}
+.modal-actions{display:flex;gap:10px;margin-top:18px;}
+.modal-actions .btn-primary{margin-top:0;}
+.btn-cancel{
+  padding:13px;background:#f1f5f9;color:var(--text-muted);border:none;border-radius:10px;
+  font-size:15px;font-weight:600;cursor:pointer;flex:1;
+}
+.empty-state{text-align:center;padding:50px 20px;color:var(--text-muted);}
+.empty-state .icon{font-size:40px;margin-bottom:12px;}
+
+.comparison-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px;}
+@media(max-width:900px){.comparison-grid{grid-template-columns:1fr;}}
+
+.loading{text-align:center;padding:30px;color:var(--text-muted);}
+footer.appfooter{text-align:center;padding:20px;color:var(--text-muted);font-size:12px;}
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="loginScreen">
+  <div class="login-box">
+    <img src="" id="loginLogo" alt="Crazy Cravings logo" class="login-logo">
+    <h1>Crazy Cravings — Despesas</h1>
+    <p>Acesso restrito — digite a senha</p>
+    <input type="password" id="passwordInput" placeholder="Access password" onkeydown="if(event.key==='Enter')doLogin()">
+    <button onclick="doLogin()">Sign In</button>
+    <div id="loginError"></div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app">
+  <header class="topbar">
+    <h1><img src="" id="headerLogo" alt="Crazy Cravings logo" class="header-logo">Crazy Cravings — Despesas</h1>
+    <div class="actions">
+      <button class="btn-logout" onclick="doLogout()">Sign Out</button>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="dashboard" onclick="switchTab('dashboard')">📊 Dashboard</button>
+    <button class="tab-btn" data-tab="cadastro" onclick="switchTab('cadastro')">➕ Add Expense</button>
+    <button class="tab-btn" data-tab="relatorios" onclick="switchTab('relatorios')">📈 Reports</button>
+    <button class="tab-btn" data-tab="contas" onclick="switchTab('contas')">🗂️ Accounts</button>
+  </nav>
+
+  <main>
+    <!-- TAB DASHBOARD -->
+    <section id="tab-dashboard" class="tab-content active"></section>
+
+    <!-- TAB CADASTRO -->
+    <section id="tab-cadastro" class="tab-content"></section>
+
+    <!-- TAB RELATORIOS -->
+    <section id="tab-relatorios" class="tab-content"></section>
+
+    <!-- TAB CONTAS/CATEGORIAS -->
+    <section id="tab-contas" class="tab-content"></section>
+
+  </main>
+
+  <footer class="appfooter">Crazy Cravings — Despesas do Negócio · dados salvos automaticamente na nuvem</footer>
+</div>
+
+<div id="modalOverlay" class="modal-overlay">
+  <div class="modal-box" id="modalBox"></div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
