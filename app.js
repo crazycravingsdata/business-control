@@ -1204,11 +1204,217 @@ function refreshContas(){
   }
 }
 
+// Independent filter state for the Accounts tab detail view (separate from the Reports tab's state)
+let acctPeriodFilter = "mensal";
+let acctReportRange = null;
+
 function showAccountDetail(categoryId){
   window.currentAccountDetailId = categoryId;
+  // reset to a sensible default each time a (possibly different) category is opened
+  if(!acctReportRange){
+    acctPeriodFilter = "mensal";
+    const now = new Date();
+    acctReportRange = computeRange('mensal', `${now.getFullYear()}-${now.getMonth()}`);
+  }
+  renderAccountDetailShell(categoryId);
+}
+
+function renderAccountDetailShell(categoryId){
   const cat = categoryById(categoryId);
-  const catTx = transactions.filter(t => t.categoryId === categoryId).sort((a,b) => a.data - b.data);
+  const detailEl = document.getElementById('accountDetail');
+
+  detailEl.innerHTML = `
+    <div class="chart-card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:16px;">
+        <h3 style="margin-bottom:4px;">${cat.icone} ${cat.nome} — Full Detail</h3>
+        <div style="text-align:right;">
+          <div style="font-size:12px;color:var(--text-muted);" id="acctTotalLabel">Total (all time)</div>
+          <div style="font-size:24px;font-weight:700;color:${cat.cor};" id="acctTotalValue"></div>
+        </div>
+      </div>
+
+      <div class="filters-bar" style="margin-bottom:16px;">
+        <div class="period-tabs" id="acctPeriodTabs">
+          <button data-period="mensal" onclick="setAcctPeriodFilter('mensal')">Monthly</button>
+          <button data-period="trimestral" onclick="setAcctPeriodFilter('trimestral')">Quarterly</button>
+          <button data-period="semestral" onclick="setAcctPeriodFilter('semestral')">Semi-annual</button>
+          <button data-period="anual" onclick="setAcctPeriodFilter('anual')">Annual</button>
+          <button data-period="custom" onclick="setAcctPeriodFilter('custom')">Custom Range</button>
+          <button data-period="all" onclick="setAcctPeriodFilter('all')">All Time</button>
+        </div>
+        <div class="field" id="acctRefSelectWrap">
+          <label style="font-size:12px;color:var(--text-muted);">Reference</label>
+          <select id="acctRefSelect" onchange="onAcctRefChange()"></select>
+        </div>
+        <div class="custom-range-fields" id="acctCustomRangeFields" style="display:none;">
+          <div class="field">
+            <label style="font-size:12px;color:var(--text-muted);">From</label>
+            <div class="month-year-group">
+              <select id="acctCustomFromMonth" class="my-month"></select>
+              <select id="acctCustomFromYear" class="my-year"></select>
+            </div>
+          </div>
+          <div class="field">
+            <label style="font-size:12px;color:var(--text-muted);">To</label>
+            <div class="month-year-group">
+              <select id="acctCustomToMonth" class="my-month"></select>
+              <select id="acctCustomToYear" class="my-year"></select>
+            </div>
+          </div>
+          <button type="button" class="btn-secondary" id="acctApplyCustomRangeBtn">Apply</button>
+        </div>
+        <button type="button" class="btn-winter" id="acctWinterBtn" title="Oct → May, Northern Hemisphere winter season">❄️ Prepare for Winter</button>
+      </div>
+
+      <div id="acctTxListWrap"></div>
+    </div>
+  `;
+
+  document.querySelectorAll('#acctPeriodTabs button').forEach(b => b.classList.toggle('active', b.dataset.period === acctPeriodFilter));
+  populateAcctRefSelect();
+  populateAcctCustomRangeSelects();
+
+  document.getElementById('acctApplyCustomRangeBtn').addEventListener('click', applyAcctCustomRange);
+  document.getElementById('acctWinterBtn').addEventListener('click', acctPrepareForWinter);
+
+  if(acctPeriodFilter === 'custom'){
+    document.getElementById('acctRefSelectWrap').style.display = 'none';
+    document.getElementById('acctCustomRangeFields').style.display = 'flex';
+  }
+
+  renderAccountDetailList(categoryId);
+}
+
+function setAcctPeriodFilter(period){
+  acctPeriodFilter = period;
+  document.querySelectorAll('#acctPeriodTabs button').forEach(b => b.classList.toggle('active', b.dataset.period === period));
+
+  const refWrap = document.getElementById('acctRefSelectWrap');
+  const customFields = document.getElementById('acctCustomRangeFields');
+
+  if(period === 'all'){
+    refWrap.style.display = 'none';
+    customFields.style.display = 'none';
+    acctReportRange = null; // signal "no filter" — show everything
+    renderAccountDetailList(window.currentAccountDetailId);
+  } else if(period === 'custom'){
+    refWrap.style.display = 'none';
+    customFields.style.display = 'flex';
+    applyAcctCustomRange();
+  } else {
+    refWrap.style.display = 'flex';
+    customFields.style.display = 'none';
+    populateAcctRefSelect();
+  }
+}
+
+function populateAcctRefSelect(){
+  const sel = document.getElementById('acctRefSelect');
+  if(!sel) return;
+  const now = new Date();
+  const options = [];
+
+  if(acctPeriodFilter === 'mensal'){
+    for(let i=-6;i<=60;i++){ // 6 months back, 5 years forward, so distant future entries are reachable
+      const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
+      options.push({value: `${d.getFullYear()}-${d.getMonth()}`, label: monthLabel(d.getFullYear(), d.getMonth())});
+    }
+  } else if(acctPeriodFilter === 'trimestral'){
+    const curQ = Math.floor(now.getMonth()/3);
+    for(let i=-4;i<=24;i++){
+      let q = curQ - i, y = now.getFullYear();
+      while(q < 0){ q += 4; y -= 1; }
+      while(q > 3){ q -= 4; y += 1; }
+      options.push({value: `${y}-${q}`, label: `Q${q+1} ${y}`});
+    }
+  } else if(acctPeriodFilter === 'semestral'){
+    const curS = Math.floor(now.getMonth()/6);
+    for(let i=-2;i<=16;i++){
+      let s = curS - i, y = now.getFullYear();
+      while(s < 0){ s += 2; y -= 1; }
+      while(s > 1){ s -= 2; y += 1; }
+      options.push({value: `${y}-${s}`, label: `H${s+1} ${y}`});
+    }
+  } else if(acctPeriodFilter === 'anual'){
+    for(let i=-2;i<=10;i++){
+      const y = now.getFullYear()-i;
+      options.push({value: `${y}`, label: `Year ${y}`});
+    }
+  }
+
+  sel.innerHTML = options.map(o => `<option value="${o.value}">${o.label}</option>`).join('');
+  onAcctRefChange();
+}
+
+function onAcctRefChange(){
+  const sel = document.getElementById('acctRefSelect');
+  acctReportRange = computeRange(acctPeriodFilter, sel.value);
+  renderAccountDetailList(window.currentAccountDetailId);
+}
+
+function populateAcctCustomRangeSelects(){
+  const fromMonthSel = document.getElementById('acctCustomFromMonth');
+  const toMonthSel = document.getElementById('acctCustomToMonth');
+  const fromYearSel = document.getElementById('acctCustomFromYear');
+  const toYearSel = document.getElementById('acctCustomToYear');
+  if(!fromMonthSel) return;
+
+  const now = new Date();
+  const monthOptHtml = MC_MONTHS_FULL.map((name, idx) => `<option value="${idx}">${name}</option>`).join('');
+  fromMonthSel.innerHTML = monthOptHtml;
+  toMonthSel.innerHTML = monthOptHtml;
+
+  const years = [];
+  for(let y = now.getFullYear() - 3; y <= now.getFullYear() + 10; y++) years.push(y);
+  const yearOptHtml = years.map(y => `<option value="${y}">${y}</option>`).join('');
+  fromYearSel.innerHTML = yearOptHtml;
+  toYearSel.innerHTML = yearOptHtml;
+
+  fromMonthSel.value = now.getMonth();
+  toMonthSel.value = now.getMonth();
+  fromYearSel.value = now.getFullYear();
+  toYearSel.value = now.getFullYear();
+}
+
+function applyAcctCustomRange(){
+  const fm = parseInt(document.getElementById('acctCustomFromMonth').value, 10);
+  const fy = parseInt(document.getElementById('acctCustomFromYear').value, 10);
+  const tm = parseInt(document.getElementById('acctCustomToMonth').value, 10);
+  const ty = parseInt(document.getElementById('acctCustomToYear').value, 10);
+
+  const start = new Date(fy, fm, 1);
+  const end = new Date(ty, tm + 1, 0, 23, 59, 59);
+  const label = `${monthLabel(fy, fm)} – ${monthLabel(ty, tm)}`;
+
+  acctReportRange = { start, end, label };
+  renderAccountDetailList(window.currentAccountDetailId);
+}
+
+function acctPrepareForWinter(){
+  const now = new Date();
+  let startYear = now.getFullYear();
+  if(now.getMonth() < 9) startYear -= 1;
+
+  setAcctPeriodFilter('custom');
+  document.getElementById('acctCustomFromMonth').value = 9;
+  document.getElementById('acctCustomFromYear').value = startYear;
+  document.getElementById('acctCustomToMonth').value = 4;
+  document.getElementById('acctCustomToYear').value = startYear + 1;
+  applyAcctCustomRange();
+}
+
+function renderAccountDetailList(categoryId){
+  const cat = categoryById(categoryId);
+  let catTx = transactions.filter(t => t.categoryId === categoryId);
+
+  if(acctReportRange){
+    catTx = catTx.filter(t => t.data >= acctReportRange.start && t.data <= acctReportRange.end);
+  }
+  catTx.sort((a,b) => a.data - b.data);
+
   const total = catTx.reduce((s,t) => s+t.valor, 0);
+  document.getElementById('acctTotalLabel').textContent = acctReportRange ? `Total (${acctReportRange.label})` : 'Total (all time)';
+  document.getElementById('acctTotalValue').textContent = formatCurrency(total);
 
   // group by year to make instalments/recurring entries easy to scan
   const byYear = {};
@@ -1218,50 +1424,38 @@ function showAccountDetail(categoryId){
     byYear[y].push(t);
   });
 
-  const detailEl = document.getElementById('accountDetail');
-  detailEl.innerHTML = `
-    <div class="chart-card">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:18px;">
-        <div>
-          <h3 style="margin-bottom:4px;">${cat.icone} ${cat.nome} — Full Detail</h3>
-          <p class="hint" style="margin:0;">${catTx.length} entr${catTx.length===1?'y':'ies'} across ${Object.keys(byYear).length} year(s)</p>
-        </div>
-        <div style="text-align:right;">
-          <div style="font-size:12px;color:var(--text-muted);">Total (all time)</div>
-          <div style="font-size:24px;font-weight:700;color:${cat.cor};">${formatCurrency(total)}</div>
-        </div>
-      </div>
-
-      ${catTx.length === 0 ? `<div class="empty-state"><div class="icon">📭</div>No entries in this category yet.</div>` :
-        Object.keys(byYear).sort().map(y => {
-          const yearTx = byYear[y];
-          const yearTotal = yearTx.reduce((s,t)=>s+t.valor,0);
-          return `
-            <div style="margin-bottom:18px;">
-              <div style="font-size:13px;font-weight:700;color:${cat.cor};margin-bottom:8px;">
-                ${y} — ${formatCurrency(yearTotal)} (${yearTx.length} entr${yearTx.length===1?'y':'ies'})
-              </div>
-              <table class="tx-table">
-                <thead><tr><th>Date</th><th>Description</th><th style="text-align:right">Amount</th><th></th></tr></thead>
-                <tbody>
-                  ${yearTx.map(t => `
-                    <tr>
-                      <td>${formatDate(t.data)} ${t.recorrente ? '<span title="Part of a recurring series">🔁</span>' : ''}</td>
-                      <td>${t.descricao}</td>
-                      <td class="valor">${formatCurrency(t.valor)}</td>
-                      <td style="white-space:nowrap;">
-                        <button class="btn-edit" onclick="openEditTransaction('${t.id}')" title="Edit">✏️</button>
-                        <button class="btn-del" onclick="deleteTransaction('${t.id}')" title="Delete">🗑️</button>
-                      </td>
-                    </tr>
-                  `).join('')}
-                </tbody>
-              </table>
+  const wrap = document.getElementById('acctTxListWrap');
+  wrap.innerHTML = `
+    <p class="hint" style="margin-bottom:14px;">${catTx.length} entr${catTx.length===1?'y':'ies'} in the selected period</p>
+    ${catTx.length === 0 ? `<div class="empty-state"><div class="icon">📭</div>No entries in this period.</div>` :
+      Object.keys(byYear).sort().map(y => {
+        const yearTx = byYear[y];
+        const yearTotal = yearTx.reduce((s,t)=>s+t.valor,0);
+        return `
+          <div style="margin-bottom:18px;">
+            <div style="font-size:13px;font-weight:700;color:${cat.cor};margin-bottom:8px;">
+              ${y} — ${formatCurrency(yearTotal)} (${yearTx.length} entr${yearTx.length===1?'y':'ies'})
             </div>
-          `;
-        }).join('')
-      }
-    </div>
+            <table class="tx-table">
+              <thead><tr><th>Date</th><th>Description</th><th style="text-align:right">Amount</th><th></th></tr></thead>
+              <tbody>
+                ${yearTx.map(t => `
+                  <tr>
+                    <td>${formatDate(t.data)} ${t.recorrente ? '<span title="Part of a recurring series">🔁</span>' : ''}</td>
+                    <td>${t.descricao}</td>
+                    <td class="valor">${formatCurrency(t.valor)}</td>
+                    <td style="white-space:nowrap;">
+                      <button class="btn-edit" onclick="openEditTransaction('${t.id}')" title="Edit">✏️</button>
+                      <button class="btn-del" onclick="deleteTransaction('${t.id}')" title="Delete">🗑️</button>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        `;
+      }).join('')
+    }
   `;
 }
 
