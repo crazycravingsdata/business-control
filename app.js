@@ -264,59 +264,57 @@ async function saveTransaction(e){
   const valor = parseFloat(document.getElementById('txValor').value);
   const categoryId = document.getElementById('txCategoria').value;
   const descricao = document.getElementById('txDescricao').value.trim();
-  const dataStr = document.getElementById('txData').value;
-  const isRecurring = document.getElementById('txRecorrente').checked;
-  const recurringYear = isRecurring ? parseInt(document.getElementById('txRecorrenteAno').value, 10) : null;
+  const isRecurring = entryMode === 'recurring';
 
-  if(!valor || valor <= 0 || !categoryId || !dataStr){
+  if(!valor || valor <= 0 || !categoryId){
     msg.style.color = 'var(--danger)';
-    msg.textContent = 'Please fill in amount, category and date correctly.';
-    return;
-  }
-  if(isRecurring && selectedMonths.size === 0){
-    msg.style.color = 'var(--danger)';
-    msg.textContent = 'Select at least one month for a recurring expense.';
+    msg.textContent = 'Please fill in amount and category correctly.';
     return;
   }
 
-  const [, , day] = dataStr.split('-').map(Number);
+  let day = 1;
+  let monthsToCreate = [];
+
+  if(isRecurring){
+    monthsToCreate = getRecurringMonthRange();
+    if(monthsToCreate.length === 0){
+      msg.style.color = 'var(--danger)';
+      msg.textContent = 'The "To" month must be on or after the "From" month.';
+      return;
+    }
+    day = new Date().getDate(); // no specific date picked in recurring mode — use today's day-of-month
+  } else {
+    const dataStr = document.getElementById('txData').value;
+    if(!dataStr){
+      msg.style.color = 'var(--danger)';
+      msg.textContent = 'Please pick a date.';
+      return;
+    }
+    const [y, m, d] = dataStr.split('-').map(Number);
+    monthsToCreate = [{ year: y, month: m - 1 }];
+    day = d;
+  }
+
   const groupId = isRecurring ? `rec_${Date.now()}` : null;
 
   try{
     const batch = db.batch();
     const newEntries = [];
 
-    if(isRecurring){
-      const monthsSorted = [...selectedMonths].sort((a,b) => a-b);
-      monthsSorted.forEach(monthIdx => {
-        const entryDate = new Date(recurringYear, monthIdx, day, 12, 0, 0);
-        const docRef = db.collection('cc_exp_transactions').doc();
-        const entryData = {
-          valor, categoryId,
-          descricao: descricao || '(no description)',
-          data: firebase.firestore.Timestamp.fromDate(entryDate),
-          recorrente: true,
-          recorrenteGroupId: groupId,
-          criado_em: firebase.firestore.FieldValue.serverTimestamp()
-        };
-        batch.set(docRef, entryData);
-        newEntries.push({ id: docRef.id, ...entryData, data: entryDate });
-      });
-    } else {
-      const [y, m] = dataStr.split('-').map(Number);
-      const entryDate = new Date(y, m-1, day, 12, 0, 0);
+    monthsToCreate.forEach(({year, month}) => {
+      const entryDate = new Date(year, month, day, 12, 0, 0);
       const docRef = db.collection('cc_exp_transactions').doc();
       const entryData = {
         valor, categoryId,
         descricao: descricao || '(no description)',
         data: firebase.firestore.Timestamp.fromDate(entryDate),
-        recorrente: false,
-        recorrenteGroupId: null,
+        recorrente: isRecurring,
+        recorrenteGroupId: groupId,
         criado_em: firebase.firestore.FieldValue.serverTimestamp()
       };
       batch.set(docRef, entryData);
       newEntries.push({ id: docRef.id, ...entryData, data: entryDate });
-    }
+    });
 
     await batch.commit();
 
@@ -325,15 +323,15 @@ async function saveTransaction(e){
     refreshDashboard();
     refreshReport();
 
+    const first = monthsToCreate[0], last = monthsToCreate[monthsToCreate.length-1];
     msg.style.color = 'var(--success)';
     msg.textContent = isRecurring
-      ? `✅ Expense saved for ${newEntries.length} month(s) in ${recurringYear}!`
+      ? `✅ Planned expense saved: ${newEntries.length} month(s), ${monthLabel(first.year, first.month)} → ${monthLabel(last.year, last.month)}!`
       : '✅ Expense saved successfully!';
     document.getElementById('txForm').reset();
-    document.getElementById('recurringOptions').style.display = 'none';
     initDatePicker(todayISO());
-    populateRecurringYearSelect();
-    renderMonthGrid();
+    populateRecurringRangeSelects();
+    setEntryMode('single');
     setTimeout(() => { msg.textContent = ''; }, 3500);
   }catch(err){
     console.error(err);
@@ -601,15 +599,21 @@ function renderCadastroShell(){
   const el = document.getElementById('tab-cadastro');
   el.innerHTML = `
     <div class="form-card">
-      <h2>➕ New Expense</h2>
-      <p class="hint">Log an expense — data is saved automatically to the cloud.</p>
+      <h2>➕ Log or Plan an Expense</h2>
+      <p class="hint">Record a one-time expense, or plan a recurring commitment (fuel, payroll, instalments...) across as many months as it actually runs — even across a year boundary. Everything is saved automatically to the cloud.</p>
+
+      <div class="entry-mode-toggle" id="entryModeToggle">
+        <button type="button" class="entry-mode-btn active" data-mode="single">💳 One-time expense</button>
+        <button type="button" class="entry-mode-btn" data-mode="recurring">🔁 Recurring / planned expense</button>
+      </div>
+
       <form id="txForm">
         <div class="form-row">
           <div class="field">
-            <label>Amount (CAD)</label>
+            <label id="txValorLabel">Amount (CAD)</label>
             <input type="number" step="0.01" min="0" id="txValor" placeholder="0.00" required>
           </div>
-          <div class="field">
+          <div class="field" id="txDataWrap">
             <label>Date</label>
             <input type="date" id="txData" lang="en-CA" required>
           </div>
@@ -623,26 +627,34 @@ function renderCadastroShell(){
         <div class="form-row">
           <div class="field field-full">
             <label>Description</label>
-            <input type="text" id="txDescricao" placeholder="e.g. Groceries, electricity bill...">
+            <input type="text" id="txDescricao" placeholder="e.g. Ingredients restock, van insurance...">
           </div>
         </div>
-        <div class="form-row">
+
+        <div class="form-row" id="recurringOptions" style="display:none;">
           <div class="field field-full recurring-field">
-            <label class="recurring-toggle">
-              <input type="checkbox" id="txRecorrente">
-              <span>🔁 This expense repeats across several months</span>
-            </label>
-            <div id="recurringOptions" style="display:none;">
-              <div class="field" style="max-width:160px;margin-bottom:12px;">
-                <label style="font-size:13px;font-weight:600;color:var(--text-muted);">Year</label>
-                <select id="txRecorrenteAno"></select>
+            <p class="hint" style="margin:0 0 12px;">This same amount will be logged once a month, every month in the range below (day-of-month comes from the Date field above).</p>
+            <div class="custom-range-fields" style="margin-bottom:12px;">
+              <div class="field">
+                <label style="font-size:12px;color:var(--text-muted);">From</label>
+                <div class="month-year-group">
+                  <select id="txRecFromMonth" class="my-month"></select>
+                  <select id="txRecFromYear" class="my-year"></select>
+                </div>
               </div>
-              <label style="font-size:13px;font-weight:600;color:var(--text-muted);display:block;margin-bottom:8px;">Select the months this expense applies to</label>
-              <div class="month-grid" id="monthGrid"></div>
+              <div class="field">
+                <label style="font-size:12px;color:var(--text-muted);">To</label>
+                <div class="month-year-group">
+                  <select id="txRecToMonth" class="my-month"></select>
+                  <select id="txRecToYear" class="my-year"></select>
+                </div>
+              </div>
             </div>
+            <p id="recurringSummary" class="hint" style="margin:0;font-weight:600;color:var(--text);"></p>
           </div>
         </div>
-        <button type="submit" class="btn-primary">Save Expense</button>
+
+        <button type="submit" class="btn-primary" id="txSubmitBtn">Save Expense</button>
         <div id="formMsg"></div>
       </form>
 
@@ -671,54 +683,93 @@ function renderCadastroShell(){
     if(e.key === 'Enter'){ e.preventDefault(); addCategory(); }
   });
 
-  document.getElementById('txRecorrente').addEventListener('change', (e) => {
-    document.getElementById('recurringOptions').style.display = e.target.checked ? 'block' : 'none';
+  document.querySelectorAll('#entryModeToggle .entry-mode-btn').forEach(btn => {
+    btn.addEventListener('click', () => setEntryMode(btn.dataset.mode));
   });
 
-  populateRecurringYearSelect();
-  renderMonthGrid();
+  populateRecurringRangeSelects();
+  ['txRecFromMonth','txRecFromYear','txRecToMonth','txRecToYear'].forEach(id => {
+    document.getElementById(id).addEventListener('change', updateRecurringSummary);
+  });
+  document.getElementById('txValor').addEventListener('input', updateRecurringSummary);
+
+  setEntryMode('single');
 }
 
-const MONTH_NAMES_SHORT = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-let selectedMonths = new Set();
+let entryMode = 'single'; // 'single' | 'recurring'
 
-function populateRecurringYearSelect(){
-  const sel = document.getElementById('txRecorrenteAno');
-  if(!sel) return;
-  const curYear = new Date().getFullYear();
+function setEntryMode(mode){
+  entryMode = mode;
+  document.querySelectorAll('#entryModeToggle .entry-mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+  document.getElementById('recurringOptions').style.display = mode === 'recurring' ? 'block' : 'none';
+  document.getElementById('txDataWrap').style.display = mode === 'recurring' ? 'none' : 'flex';
+  document.getElementById('txValorLabel').textContent = mode === 'recurring' ? 'Amount per month (CAD)' : 'Amount (CAD)';
+  document.getElementById('txSubmitBtn').textContent = mode === 'recurring' ? 'Save Recurring Expense' : 'Save Expense';
+  if(mode === 'recurring') updateRecurringSummary();
+}
+
+function populateRecurringRangeSelects(){
+  const fromMonthSel = document.getElementById('txRecFromMonth');
+  const toMonthSel = document.getElementById('txRecToMonth');
+  const fromYearSel = document.getElementById('txRecFromYear');
+  const toYearSel = document.getElementById('txRecToYear');
+  if(!fromMonthSel) return;
+
+  const now = new Date();
+  const monthOptHtml = MC_MONTHS_FULL.map((name, idx) => `<option value="${idx}">${name}</option>`).join('');
+  fromMonthSel.innerHTML = monthOptHtml;
+  toMonthSel.innerHTML = monthOptHtml;
+
   const years = [];
-  for(let y = curYear - 2; y <= curYear + 10; y++) years.push(y);
-  sel.innerHTML = years.map(y => `<option value="${y}" ${y===curYear?'selected':''}>${y}</option>`).join('');
+  for(let y = now.getFullYear() - 2; y <= now.getFullYear() + 10; y++) years.push(y);
+  const yearOptHtml = years.map(y => `<option value="${y}">${y}</option>`).join('');
+  fromYearSel.innerHTML = yearOptHtml;
+  toYearSel.innerHTML = yearOptHtml;
+
+  // Default: a sensible 1-year runway starting this month — covers the
+  // common "this expense runs into next year" case out of the box.
+  fromMonthSel.value = now.getMonth();
+  fromYearSel.value = now.getFullYear();
+  const defaultEnd = new Date(now.getFullYear(), now.getMonth() + 11, 1);
+  toMonthSel.value = defaultEnd.getMonth();
+  toYearSel.value = defaultEnd.getFullYear();
 }
 
-function renderMonthGrid(){
-  const grid = document.getElementById('monthGrid');
-  if(!grid) return;
-  const curMonth = new Date().getMonth();
-  selectedMonths = new Set([curMonth]); // default: current month pre-selected
-  grid.innerHTML = MONTH_NAMES_SHORT.map((name, idx) => `
-    <label class="month-chip ${selectedMonths.has(idx)?'selected':''}" data-month="${idx}">
-      <input type="checkbox" value="${idx}" ${selectedMonths.has(idx)?'checked':''} style="display:none;">
-      ${name}
-    </label>
-  `).join('');
+// Returns an ordered list of {year, month} covering [from, to] inclusive,
+// correctly spanning across a year boundary (e.g. Sep 2026 → May 2027).
+function getRecurringMonthRange(){
+  const fm = parseInt(document.getElementById('txRecFromMonth').value, 10);
+  const fy = parseInt(document.getElementById('txRecFromYear').value, 10);
+  const tm = parseInt(document.getElementById('txRecToMonth').value, 10);
+  const ty = parseInt(document.getElementById('txRecToYear').value, 10);
 
-  grid.querySelectorAll('.month-chip').forEach(chip => {
-    chip.addEventListener('click', (e) => {
-      e.preventDefault();
-      const idx = parseInt(chip.dataset.month, 10);
-      const checkbox = chip.querySelector('input');
-      if(selectedMonths.has(idx)){
-        selectedMonths.delete(idx);
-        checkbox.checked = false;
-        chip.classList.remove('selected');
-      } else {
-        selectedMonths.add(idx);
-        checkbox.checked = true;
-        chip.classList.add('selected');
-      }
-    });
-  });
+  const months = [];
+  let y = fy, m = fm;
+  let guard = 0;
+  while((y < ty || (y === ty && m <= tm)) && guard < 600){
+    months.push({ year: y, month: m });
+    m++;
+    if(m > 11){ m = 0; y++; }
+    guard++;
+  }
+  return months;
+}
+
+function updateRecurringSummary(){
+  const summaryEl = document.getElementById('recurringSummary');
+  if(!summaryEl) return;
+  const months = getRecurringMonthRange();
+  const valor = parseFloat(document.getElementById('txValor').value) || 0;
+
+  if(months.length === 0){
+    summaryEl.textContent = 'The "To" month must be on or after the "From" month.';
+    summaryEl.style.color = 'var(--danger)';
+    return;
+  }
+  const first = months[0], last = months[months.length-1];
+  const total = valor * months.length;
+  summaryEl.style.color = 'var(--text)';
+  summaryEl.textContent = `📅 ${monthLabel(first.year, first.month)} → ${monthLabel(last.year, last.month)} · ${months.length} month${months.length===1?'':'s'} · Total commitment: ${formatCurrency(total)}`;
 }
 
 // ============================================================
@@ -756,7 +807,7 @@ function renderRelatoriosShell(){
         </div>
         <button type="button" class="btn-secondary" id="applyCustomRangeBtn">Apply</button>
       </div>
-      <button type="button" class="btn-winter" id="winterBtn" title="Oct → May, Northern Hemisphere winter season">❄️ Prepare for Winter</button>
+      <button type="button" class="btn-winter" id="winterBtn" title="Oct → Jun, off-season">❄️ Prepare for Winter</button>
       <div class="export-btns">
         <button onclick="exportCSV()">⬇️ CSV</button>
         <button onclick="exportPDF()">📄 PDF</button>
@@ -858,18 +909,18 @@ function applyCustomRange(){
   refreshReport();
 }
 
-// "Prepare for Winter" — shortcut for the Northern Hemisphere cold season, October through May
+// "Prepare for Winter" — shortcut for the off-season, October through June
 function prepareForWinter(){
   const now = new Date();
-  // If we're currently past May, anchor the winter season starting this October;
-  // otherwise (Jan–May) we're likely still inside a winter that started last October.
+  // If we're currently past June, anchor the season starting this October;
+  // otherwise (Jan–Jun) we're likely still inside a season that started last October.
   let startYear = now.getFullYear();
   if(now.getMonth() < 9) startYear -= 1; // months are 0-indexed; Oct = 9
 
   setPeriodFilter('custom');
   document.getElementById('customFromMonth').value = 9;  // October
   document.getElementById('customFromYear').value = startYear;
-  document.getElementById('customToMonth').value = 4;    // May
+  document.getElementById('customToMonth').value = 5;    // June
   document.getElementById('customToYear').value = startYear + 1;
   applyCustomRange();
 }
@@ -1260,7 +1311,7 @@ function renderAccountDetailShell(categoryId){
           </div>
           <button type="button" class="btn-secondary" id="acctApplyCustomRangeBtn">Apply</button>
         </div>
-        <button type="button" class="btn-winter" id="acctWinterBtn" title="Oct → May, Northern Hemisphere winter season">❄️ Prepare for Winter</button>
+        <button type="button" class="btn-winter" id="acctWinterBtn" title="Oct → Jun, off-season">❄️ Prepare for Winter</button>
       </div>
 
       <div id="acctTxListWrap"></div>
@@ -1395,7 +1446,7 @@ function acctPrepareForWinter(){
   setAcctPeriodFilter('custom');
   document.getElementById('acctCustomFromMonth').value = 9;
   document.getElementById('acctCustomFromYear').value = startYear;
-  document.getElementById('acctCustomToMonth').value = 4;
+  document.getElementById('acctCustomToMonth').value = 5;
   document.getElementById('acctCustomToYear').value = startYear + 1;
   applyAcctCustomRange();
 }
