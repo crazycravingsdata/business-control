@@ -272,27 +272,25 @@ async function saveTransaction(e){
     return;
   }
 
-  let day = 1;
+  const dataStr = document.getElementById('txData').value;
+  if(!dataStr){
+    msg.style.color = 'var(--danger)';
+    msg.textContent = isRecurring ? 'Please pick a start/due date.' : 'Please pick a date.';
+    return;
+  }
+  const [y, m, d] = dataStr.split('-').map(Number);
+  let day = d;
   let monthsToCreate = [];
 
   if(isRecurring){
     monthsToCreate = getRecurringMonthRange();
     if(monthsToCreate.length === 0){
       msg.style.color = 'var(--danger)';
-      msg.textContent = 'The "To" month must be on or after the "From" month.';
+      msg.textContent = 'The end month must be on or after the Start/Due Date.';
       return;
     }
-    day = new Date().getDate(); // no specific date picked in recurring mode — use today's day-of-month
   } else {
-    const dataStr = document.getElementById('txData').value;
-    if(!dataStr){
-      msg.style.color = 'var(--danger)';
-      msg.textContent = 'Please pick a date.';
-      return;
-    }
-    const [y, m, d] = dataStr.split('-').map(Number);
     monthsToCreate = [{ year: y, month: m - 1 }];
-    day = d;
   }
 
   const groupId = isRecurring ? `rec_${Date.now()}` : null;
@@ -614,7 +612,7 @@ function renderCadastroShell(){
             <input type="number" step="0.01" min="0" id="txValor" placeholder="0.00" required>
           </div>
           <div class="field" id="txDataWrap">
-            <label>Date</label>
+            <label id="txDataLabel">Date</label>
             <input type="date" id="txData" lang="en-CA" required>
           </div>
         </div>
@@ -633,24 +631,15 @@ function renderCadastroShell(){
 
         <div class="form-row" id="recurringOptions" style="display:none;">
           <div class="field field-full recurring-field">
-            <p class="hint" style="margin:0 0 12px;">This same amount will be logged once a month, every month in the range below (day-of-month comes from the Date field above).</p>
-            <div class="custom-range-fields" style="margin-bottom:12px;">
-              <div class="field">
-                <label style="font-size:12px;color:var(--text-muted);">From</label>
-                <div class="month-year-group">
-                  <select id="txRecFromMonth" class="my-month"></select>
-                  <select id="txRecFromYear" class="my-year"></select>
-                </div>
-              </div>
-              <div class="field">
-                <label style="font-size:12px;color:var(--text-muted);">To</label>
-                <div class="month-year-group">
-                  <select id="txRecToMonth" class="my-month"></select>
-                  <select id="txRecToYear" class="my-year"></select>
-                </div>
+            <p class="hint" style="margin:0 0 12px;">This same amount will be logged once a month, starting on the Start/Due Date above, until the end month below.</p>
+            <div class="field" style="max-width:220px;">
+              <label style="font-size:12px;color:var(--text-muted);">Ends in (last month)</label>
+              <div class="month-year-group">
+                <select id="txRecToMonth" class="my-month"></select>
+                <select id="txRecToYear" class="my-year"></select>
               </div>
             </div>
-            <p id="recurringSummary" class="hint" style="margin:0;font-weight:600;color:var(--text);"></p>
+            <p id="recurringSummary" class="hint" style="margin:12px 0 0;font-weight:600;color:var(--text);"></p>
           </div>
         </div>
 
@@ -688,10 +677,11 @@ function renderCadastroShell(){
   });
 
   populateRecurringRangeSelects();
-  ['txRecFromMonth','txRecFromYear','txRecToMonth','txRecToYear'].forEach(id => {
+  ['txRecToMonth','txRecToYear'].forEach(id => {
     document.getElementById(id).addEventListener('change', updateRecurringSummary);
   });
   document.getElementById('txValor').addEventListener('input', updateRecurringSummary);
+  document.getElementById('txData').addEventListener('change', updateRecurringSummary);
 
   setEntryMode('single');
 }
@@ -702,44 +692,47 @@ function setEntryMode(mode){
   entryMode = mode;
   document.querySelectorAll('#entryModeToggle .entry-mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
   document.getElementById('recurringOptions').style.display = mode === 'recurring' ? 'block' : 'none';
-  document.getElementById('txDataWrap').style.display = mode === 'recurring' ? 'none' : 'flex';
   document.getElementById('txValorLabel').textContent = mode === 'recurring' ? 'Amount per month (CAD)' : 'Amount (CAD)';
+  document.getElementById('txDataLabel').textContent = mode === 'recurring' ? 'Start / Due Date' : 'Date';
   document.getElementById('txSubmitBtn').textContent = mode === 'recurring' ? 'Save Recurring Expense' : 'Save Expense';
   if(mode === 'recurring') updateRecurringSummary();
 }
 
 function populateRecurringRangeSelects(){
-  const fromMonthSel = document.getElementById('txRecFromMonth');
   const toMonthSel = document.getElementById('txRecToMonth');
-  const fromYearSel = document.getElementById('txRecFromYear');
   const toYearSel = document.getElementById('txRecToYear');
-  if(!fromMonthSel) return;
+  if(!toMonthSel) return;
 
   const now = new Date();
   const monthOptHtml = MC_MONTHS_FULL.map((name, idx) => `<option value="${idx}">${name}</option>`).join('');
-  fromMonthSel.innerHTML = monthOptHtml;
   toMonthSel.innerHTML = monthOptHtml;
 
   const years = [];
   for(let y = now.getFullYear() - 2; y <= now.getFullYear() + 10; y++) years.push(y);
-  const yearOptHtml = years.map(y => `<option value="${y}">${y}</option>`).join('');
-  fromYearSel.innerHTML = yearOptHtml;
-  toYearSel.innerHTML = yearOptHtml;
+  toYearSel.innerHTML = years.map(y => `<option value="${y}">${y}</option>`).join('');
 
-  // Default: a sensible 1-year runway starting this month — covers the
-  // common "this expense runs into next year" case out of the box.
-  fromMonthSel.value = now.getMonth();
-  fromYearSel.value = now.getFullYear();
-  const defaultEnd = new Date(now.getFullYear(), now.getMonth() + 11, 1);
+  // Default: a sensible 1-year runway starting from the Start/Due Date field.
+  const startDate = getRecurringStartDate();
+  const defaultEnd = new Date(startDate.getFullYear(), startDate.getMonth() + 11, 1);
   toMonthSel.value = defaultEnd.getMonth();
   toYearSel.value = defaultEnd.getFullYear();
+}
+
+// The recurring series always starts from the Start/Due Date field (day, month, year).
+function getRecurringStartDate(){
+  const dataStr = document.getElementById('txData').value;
+  if(dataStr){
+    const [y, m, d] = dataStr.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  }
+  return new Date();
 }
 
 // Returns an ordered list of {year, month} covering [from, to] inclusive,
 // correctly spanning across a year boundary (e.g. Sep 2026 → May 2027).
 function getRecurringMonthRange(){
-  const fm = parseInt(document.getElementById('txRecFromMonth').value, 10);
-  const fy = parseInt(document.getElementById('txRecFromYear').value, 10);
+  const start = getRecurringStartDate();
+  const fy = start.getFullYear(), fm = start.getMonth();
   const tm = parseInt(document.getElementById('txRecToMonth').value, 10);
   const ty = parseInt(document.getElementById('txRecToYear').value, 10);
 
@@ -762,7 +755,7 @@ function updateRecurringSummary(){
   const valor = parseFloat(document.getElementById('txValor').value) || 0;
 
   if(months.length === 0){
-    summaryEl.textContent = 'The "To" month must be on or after the "From" month.';
+    summaryEl.textContent = 'The end month must be on or after the Start/Due Date.';
     summaryEl.style.color = 'var(--danger)';
     return;
   }
@@ -1314,6 +1307,7 @@ function renderAccountDetailShell(categoryId){
         <button type="button" class="btn-winter" id="acctWinterBtn" title="Oct → Jun, off-season">❄️ Prepare for Winter</button>
       </div>
 
+      <div id="acctSeriesWrap"></div>
       <div id="acctTxListWrap"></div>
     </div>
   `;
@@ -1321,6 +1315,7 @@ function renderAccountDetailShell(categoryId){
   document.querySelectorAll('#acctPeriodTabs button').forEach(b => b.classList.toggle('active', b.dataset.period === acctPeriodFilter));
   populateAcctRefSelect();
   populateAcctCustomRangeSelects();
+  renderAccountSeriesList(categoryId);
 
   document.getElementById('acctApplyCustomRangeBtn').addEventListener('click', applyAcctCustomRange);
   document.getElementById('acctWinterBtn').addEventListener('click', acctPrepareForWinter);
@@ -1505,6 +1500,132 @@ function renderAccountDetailList(categoryId){
       }).join('')
     }
   `;
+}
+
+// ------------------------------------------------------------------
+// RECURRING SERIES — block editor
+// Lets the user edit (amount/description) or delete every instalment
+// of a recurring plan in one action, instead of one row at a time.
+// Independent of the period filter above: always shows the full series.
+// ------------------------------------------------------------------
+function renderAccountSeriesList(categoryId){
+  const wrap = document.getElementById('acctSeriesWrap');
+  if(!wrap) return;
+
+  const seriesMap = {};
+  transactions
+    .filter(t => t.categoryId === categoryId && t.recorrenteGroupId)
+    .forEach(t => {
+      if(!seriesMap[t.recorrenteGroupId]) seriesMap[t.recorrenteGroupId] = [];
+      seriesMap[t.recorrenteGroupId].push(t);
+    });
+
+  const groupIds = Object.keys(seriesMap);
+  if(groupIds.length === 0){ wrap.innerHTML = ''; return; }
+
+  wrap.innerHTML = `
+    <p class="hint" style="margin-bottom:10px;">🔁 Recurring plans in this category — edit or delete a whole block of instalments at once.</p>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:22px;">
+      ${groupIds.map(gid => {
+        const entries = [...seriesMap[gid]].sort((a,b) => a.data - b.data);
+        const first = entries[0], last = entries[entries.length-1];
+        const total = entries.reduce((s,t) => s+t.valor, 0);
+        return `
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;padding:12px 14px;border:1px solid var(--border);border-radius:10px;background:#fafbfc;">
+            <div>
+              <div style="font-weight:700;font-size:14px;">${first.descricao}</div>
+              <div style="font-size:12px;color:var(--text-muted);">${monthLabel(first.data.getFullYear(), first.data.getMonth())} → ${monthLabel(last.data.getFullYear(), last.data.getMonth())} · ${entries.length} instalment${entries.length===1?'':'s'} · ${formatCurrency(first.valor)}/mo · Total ${formatCurrency(total)}</div>
+            </div>
+            <div style="display:flex;gap:6px;">
+              <button type="button" class="btn-secondary" onclick="openEditSeries('${gid}')">✏️ Edit block</button>
+              <button type="button" class="btn-secondary" style="color:var(--danger);" onclick="confirmDeleteSeries('${gid}')">🗑️ Delete block</button>
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
+
+function openEditSeries(groupId){
+  const entries = transactions.filter(t => t.recorrenteGroupId === groupId).sort((a,b) => a.data - b.data);
+  if(entries.length === 0) return;
+  const first = entries[0], last = entries[entries.length-1];
+
+  openModal(`
+    <h2>✏️ Edit Recurring Block</h2>
+    <p class="hint" style="margin-bottom:16px;">${monthLabel(first.data.getFullYear(), first.data.getMonth())} → ${monthLabel(last.data.getFullYear(), last.data.getMonth())} · ${entries.length} instalments. Changes below apply to every instalment in this block — the dates stay the same.</p>
+    <form id="editSeriesForm">
+      <div class="form-row">
+        <div class="field">
+          <label>Amount per month (CAD)</label>
+          <input type="number" step="0.01" min="0" id="editSeriesValor" value="${first.valor}" required>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="field field-full">
+          <label>Description</label>
+          <input type="text" id="editSeriesDescricao" value="${first.descricao.replace(/"/g,'&quot;')}">
+        </div>
+      </div>
+      <div id="editSeriesMsg" style="font-size:13px;color:var(--danger);min-height:16px;"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn-cancel" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn-primary">Save to all ${entries.length} instalments</button>
+      </div>
+    </form>
+  `);
+
+  document.getElementById('editSeriesForm').addEventListener('submit', (e) => saveEditedSeries(e, groupId));
+}
+
+async function saveEditedSeries(e, groupId){
+  e.preventDefault();
+  const msg = document.getElementById('editSeriesMsg');
+  const valor = parseFloat(document.getElementById('editSeriesValor').value);
+  const descricao = document.getElementById('editSeriesDescricao').value.trim() || '(no description)';
+
+  if(!valor || valor <= 0){
+    msg.textContent = 'Enter a valid amount.';
+    return;
+  }
+
+  try{
+    const entries = transactions.filter(t => t.recorrenteGroupId === groupId);
+    const batch = db.batch();
+    entries.forEach(t => {
+      batch.update(db.collection('cc_exp_transactions').doc(t.id), { valor, descricao });
+    });
+    await batch.commit();
+
+    transactions = transactions.map(t =>
+      t.recorrenteGroupId === groupId ? { ...t, valor, descricao } : t
+    );
+
+    closeModal();
+    refreshDashboard();
+    refreshReport();
+    if(document.getElementById('accountsGrid')) refreshContas();
+    if(window.currentAccountDetailId){
+      renderAccountSeriesList(window.currentAccountDetailId);
+      renderAccountDetailList(window.currentAccountDetailId);
+    }
+  }catch(err){
+    console.error('Error updating series', err);
+    msg.textContent = `Could not save: ${err.code || err.message || 'unknown error'}`;
+  }
+}
+
+async function confirmDeleteSeries(groupId){
+  const count = transactions.filter(t => t.recorrenteGroupId === groupId).length;
+  if(!confirm(`Delete all ${count} instalments in this recurring block? This cannot be undone.`)) return;
+
+  await deleteTransactionSeries(groupId);
+  if(document.getElementById('accountsGrid')) refreshContas();
+  if(window.currentAccountDetailId){
+    renderAccountSeriesList(window.currentAccountDetailId);
+    renderAccountDetailList(window.currentAccountDetailId);
+  }
 }
 
 // ============================================================
