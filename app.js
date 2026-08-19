@@ -6,15 +6,12 @@
 // ---------- CONFIGURAÇÃO FIREBASE ----------
 // TODO: substituir pelos dados do seu projeto Firebase (Console > Configurações do Projeto)
 const firebaseConfig = {
-  // TODO: cole aqui as credenciais do SEU NOVO projeto Firebase
-  // (Firebase Console > Configurações do Projeto > Seus apps > SDK setup)
-  // NUNCA reutilize aqui o firebaseConfig do app pessoal (finance-control-b42ed).
-  apiKey: "SUA_API_KEY",
-  authDomain: "SEU_PROJETO.firebaseapp.com",
-  projectId: "SEU_PROJETO",
-  storageBucket: "SEU_PROJETO.firebasestorage.app",
-  messagingSenderId: "SEU_SENDER_ID",
-  appId: "SEU_APP_ID"
+  apiKey: "AIzaSyCvaN9_XplnY955fANSe6mQVyD--VbeFag",
+  authDomain: "business-finance-control.firebaseapp.com",
+  projectId: "business-finance-control",
+  storageBucket: "business-finance-control.firebasestorage.app",
+  messagingSenderId: "716760378154",
+  appId: "1:716760378154:web:64bb858a9980ec74540c53"
 };
 
 firebase.initializeApp(firebaseConfig);
