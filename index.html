@@ -154,6 +154,30 @@ main{padding:24px;max-width:1200px;margin:0 auto;}
 .recurring-field{
   background:#f8fafc;border:1px dashed var(--border);border-radius:10px;padding:14px 16px;
 }
+.rec-year-block{
+  background:#fff;border:1px solid var(--border);border-radius:10px;
+  padding:12px 14px;margin-bottom:12px;
+}
+.rec-year-block-header{
+  display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;
+}
+.rec-year-select-wrap{display:flex;align-items:center;gap:8px;}
+.rec-year-select-wrap label{font-size:13px;color:var(--text-muted);}
+.rec-year-select-wrap select{min-width:90px;padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:13px;}
+.rec-remove-year-btn{
+  background:none;border:none;color:var(--danger);cursor:pointer;font-size:15px;padding:2px 6px;
+}
+.rec-month-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:5px;}
+@media(max-width:560px){.rec-month-grid{grid-template-columns:repeat(4,1fr);}}
+.rec-month-pill{
+  padding:7px 4px;border-radius:8px;font-size:12px;font-weight:700;text-align:center;
+  cursor:pointer;border:1px solid var(--border);background:#f8fafc;color:var(--text-muted);
+  user-select:none;transition:.1s;
+}
+.rec-month-pill:hover{border-color:var(--primary);}
+.rec-month-pill.selected{
+  background:#eef2ff;color:var(--primary);border-color:var(--primary);
+}
 .entry-mode-toggle{
   display:flex;gap:8px;background:#f1f5f9;padding:4px;border-radius:10px;margin-bottom:18px;
 }
@@ -203,12 +227,6 @@ main{padding:24px;max-width:1200px;margin:0 auto;}
 .month-year-group{display:flex;gap:6px;align-items:center;}
 .month-year-group .my-month{min-width:130px;}
 .month-year-group .my-year{min-width:85px;}
-.year-bump-btn{
-  padding:9px 10px;border-radius:8px;border:1px solid var(--border);
-  background:#f8fafc;font-size:12px;font-weight:700;color:var(--primary);cursor:pointer;
-  white-space:nowrap;
-}
-.year-bump-btn:hover{background:#eef2ff;}
 .quick-actions{display:flex;gap:8px;flex-wrap:wrap;}
 .btn-winter{
   padding:9px 16px;border-radius:8px;border:1px solid #93c5fd;background:#eff6ff;

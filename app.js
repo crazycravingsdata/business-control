@@ -286,7 +286,7 @@ async function saveTransaction(e){
     monthsToCreate = getRecurringMonthRange();
     if(monthsToCreate.length === 0){
       msg.style.color = 'var(--danger)';
-      msg.textContent = 'The end month must be on or after the Start/Due Date.';
+      msg.textContent = 'Select at least one month for this recurring expense.';
       return;
     }
   } else {
@@ -324,11 +324,11 @@ async function saveTransaction(e){
     const first = monthsToCreate[0], last = monthsToCreate[monthsToCreate.length-1];
     msg.style.color = 'var(--success)';
     msg.textContent = isRecurring
-      ? `✅ Planned expense saved: ${newEntries.length} month(s), ${monthLabel(first.year, first.month)} → ${monthLabel(last.year, last.month)}!`
+      ? `✅ Planned expense saved: ${newEntries.length} month(s)${newEntries.length > 1 ? ` (${monthLabel(first.year, first.month)} → ${monthLabel(last.year, last.month)})` : ''}!`
       : '✅ Expense saved successfully!';
     document.getElementById('txForm').reset();
     initDatePicker(todayISO());
-    populateRecurringRangeSelects();
+    recurringYearBlocks = [];
     setEntryMode('single');
     setTimeout(() => { msg.textContent = ''; }, 3500);
   }catch(err){
@@ -631,16 +631,10 @@ function renderCadastroShell(){
 
         <div class="form-row" id="recurringOptions" style="display:none;">
           <div class="field field-full recurring-field">
-            <p class="hint" style="margin:0 0 12px;">This same amount will be logged once a month, starting on the Start/Due Date above, until the end month below.</p>
-            <div class="field" style="max-width:260px;">
-              <label style="font-size:12px;color:var(--text-muted);">Ends in (last month)</label>
-              <div class="month-year-group">
-                <select id="txRecToMonth" class="my-month"></select>
-                <select id="txRecToYear" class="my-year"></select>
-                <button type="button" class="year-bump-btn" id="txRecYearBumpBtn" title="Move end date 1 year forward">+1 year</button>
-              </div>
-            </div>
-            <p id="recurringSummary" class="hint" style="margin:12px 0 0;font-weight:600;color:var(--text);"></p>
+            <p class="hint" style="margin:0 0 12px;">Pick which months this expense repeats in — add as many years as you need, and mark different months in each one. The day of month always comes from the Start/Due Date above.</p>
+            <div id="recurringYearBlocks"></div>
+            <button type="button" class="btn-secondary" id="addRecYearBtn">➕ Add another year</button>
+            <p id="recurringSummary" class="hint" style="margin:14px 0 0;font-weight:600;color:var(--text);"></p>
           </div>
         </div>
 
@@ -677,19 +671,7 @@ function renderCadastroShell(){
     btn.addEventListener('click', () => setEntryMode(btn.dataset.mode));
   });
 
-  populateRecurringRangeSelects();
-  ['txRecToMonth','txRecToYear'].forEach(id => {
-    document.getElementById(id).addEventListener('change', updateRecurringSummary);
-  });
-  document.getElementById('txRecYearBumpBtn').addEventListener('click', () => {
-    const sel = document.getElementById('txRecToYear');
-    const options = [...sel.options].map(o => parseInt(o.value, 10));
-    const next = parseInt(sel.value, 10) + 1;
-    if(options.includes(next)){
-      sel.value = next;
-      updateRecurringSummary();
-    }
-  });
+  document.getElementById('addRecYearBtn').addEventListener('click', addRecurringYearBlock);
   document.getElementById('txValor').addEventListener('input', updateRecurringSummary);
   document.getElementById('txData').addEventListener('change', updateRecurringSummary);
 
@@ -705,28 +687,14 @@ function setEntryMode(mode){
   document.getElementById('txValorLabel').textContent = mode === 'recurring' ? 'Amount per month (CAD)' : 'Amount (CAD)';
   document.getElementById('txDataLabel').textContent = mode === 'recurring' ? 'Start / Due Date' : 'Date';
   document.getElementById('txSubmitBtn').textContent = mode === 'recurring' ? 'Save Recurring Expense' : 'Save Expense';
-  if(mode === 'recurring') updateRecurringSummary();
+  if(mode === 'recurring'){
+    if(recurringYearBlocks.length === 0) resetRecurringYearBlocks();
+    else renderRecurringYearBlocks();
+    updateRecurringSummary();
+  }
 }
 
-function populateRecurringRangeSelects(){
-  const toMonthSel = document.getElementById('txRecToMonth');
-  const toYearSel = document.getElementById('txRecToYear');
-  if(!toMonthSel) return;
-
-  const now = new Date();
-  const monthOptHtml = MC_MONTHS_FULL.map((name, idx) => `<option value="${idx}">${name}</option>`).join('');
-  toMonthSel.innerHTML = monthOptHtml;
-
-  const years = [];
-  for(let y = now.getFullYear() - 2; y <= now.getFullYear() + 10; y++) years.push(y);
-  toYearSel.innerHTML = years.map(y => `<option value="${y}">${y}</option>`).join('');
-
-  // Default: a sensible 1-year runway starting from the Start/Due Date field.
-  const startDate = getRecurringStartDate();
-  const defaultEnd = new Date(startDate.getFullYear(), startDate.getMonth() + 11, 1);
-  toMonthSel.value = defaultEnd.getMonth();
-  toYearSel.value = defaultEnd.getFullYear();
-}
+let recurringYearBlocks = []; // [{ year, months: Set<number> }] — one block per year, independent month picks
 
 // The recurring series always starts from the Start/Due Date field (day, month, year).
 function getRecurringStartDate(){
@@ -738,24 +706,91 @@ function getRecurringStartDate(){
   return new Date();
 }
 
-// Returns an ordered list of {year, month} covering [from, to] inclusive,
-// correctly spanning across a year boundary (e.g. Sep 2026 → May 2027).
-function getRecurringMonthRange(){
-  const start = getRecurringStartDate();
-  const fy = start.getFullYear(), fm = start.getMonth();
-  const tm = parseInt(document.getElementById('txRecToMonth').value, 10);
-  const ty = parseInt(document.getElementById('txRecToYear').value, 10);
+// Seeds a single year-block (the Start/Due Date's year and month) — used the first
+// time "Recurring" is selected, so the picker isn't empty.
+function resetRecurringYearBlocks(){
+  const startDate = getRecurringStartDate();
+  recurringYearBlocks = [{ year: startDate.getFullYear(), months: new Set([startDate.getMonth()]) }];
+  renderRecurringYearBlocks();
+}
 
-  const months = [];
-  let y = fy, m = fm;
-  let guard = 0;
-  while((y < ty || (y === ty && m <= tm)) && guard < 600){
-    months.push({ year: y, month: m });
-    m++;
-    if(m > 11){ m = 0; y++; }
-    guard++;
-  }
-  return months;
+function addRecurringYearBlock(){
+  const usedYears = new Set(recurringYearBlocks.map(b => b.year));
+  let y = recurringYearBlocks.length
+    ? Math.max(...recurringYearBlocks.map(b => b.year)) + 1
+    : new Date().getFullYear();
+  while(usedYears.has(y)) y++;
+  recurringYearBlocks.push({ year: y, months: new Set() });
+  renderRecurringYearBlocks();
+  updateRecurringSummary();
+}
+
+function renderRecurringYearBlocks(){
+  const container = document.getElementById('recurringYearBlocks');
+  if(!container) return;
+
+  const now = new Date();
+  const yearOptionPool = [];
+  for(let y = now.getFullYear() - 2; y <= now.getFullYear() + 10; y++) yearOptionPool.push(y);
+
+  container.innerHTML = recurringYearBlocks.map((block, bi) => `
+    <div class="rec-year-block">
+      <div class="rec-year-block-header">
+        <div class="rec-year-select-wrap">
+          <label>Year</label>
+          <select data-rec-year-select="${bi}">
+            ${yearOptionPool.map(y => `<option value="${y}" ${y===block.year?'selected':''}>${y}</option>`).join('')}
+          </select>
+        </div>
+        ${recurringYearBlocks.length > 1 ? `<button type="button" class="rec-remove-year-btn" data-rec-remove="${bi}" title="Remove this year">🗑️</button>` : ''}
+      </div>
+      <div class="rec-month-grid">
+        ${MC_MONTHS_FULL.map((name, mi) => `
+          <div class="rec-month-pill ${block.months.has(mi) ? 'selected' : ''}" data-rec-block="${bi}" data-rec-month="${mi}">${name.slice(0,3)}</div>
+        `).join('')}
+      </div>
+    </div>
+  `).join('');
+
+  container.querySelectorAll('[data-rec-block]').forEach(el => {
+    el.addEventListener('click', () => {
+      const bi = parseInt(el.dataset.recBlock, 10);
+      const mi = parseInt(el.dataset.recMonth, 10);
+      const set = recurringYearBlocks[bi].months;
+      set.has(mi) ? set.delete(mi) : set.add(mi);
+      renderRecurringYearBlocks();
+      updateRecurringSummary();
+    });
+  });
+
+  container.querySelectorAll('[data-rec-year-select]').forEach(el => {
+    el.addEventListener('change', () => {
+      const bi = parseInt(el.dataset.recYearSelect, 10);
+      recurringYearBlocks[bi].year = parseInt(el.value, 10);
+      renderRecurringYearBlocks();
+      updateRecurringSummary();
+    });
+  });
+
+  container.querySelectorAll('[data-rec-remove]').forEach(el => {
+    el.addEventListener('click', () => {
+      const bi = parseInt(el.dataset.recRemove, 10);
+      recurringYearBlocks.splice(bi, 1);
+      renderRecurringYearBlocks();
+      updateRecurringSummary();
+    });
+  });
+}
+
+// Returns an ordered list of {year, month} from every year-block's checked months,
+// sorted chronologically. Blocks don't need to be contiguous — e.g. May/Jun/Sep 2026
+// plus Jan/Feb 2027 is a valid selection.
+function getRecurringMonthRange(){
+  const entries = [];
+  [...recurringYearBlocks].sort((a,b) => a.year - b.year).forEach(block => {
+    [...block.months].sort((a,b) => a-b).forEach(m => entries.push({ year: block.year, month: m }));
+  });
+  return entries;
 }
 
 function updateRecurringSummary(){
@@ -765,14 +800,14 @@ function updateRecurringSummary(){
   const valor = parseFloat(document.getElementById('txValor').value) || 0;
 
   if(months.length === 0){
-    summaryEl.textContent = 'The end month must be on or after the Start/Due Date.';
+    summaryEl.textContent = 'Select at least one month.';
     summaryEl.style.color = 'var(--danger)';
     return;
   }
-  const first = months[0], last = months[months.length-1];
   const total = valor * months.length;
+  const list = months.map(({year, month}) => monthLabel(year, month)).join(', ');
   summaryEl.style.color = 'var(--text)';
-  summaryEl.textContent = `📅 ${monthLabel(first.year, first.month)} → ${monthLabel(last.year, last.month)} · ${months.length} month${months.length===1?'':'s'} · Total commitment: ${formatCurrency(total)}`;
+  summaryEl.textContent = `📅 ${months.length} month${months.length===1?'':'s'} selected: ${list} · Total commitment: ${formatCurrency(total)}`;
 }
 
 // ============================================================
