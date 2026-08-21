@@ -632,11 +632,12 @@ function renderCadastroShell(){
         <div class="form-row" id="recurringOptions" style="display:none;">
           <div class="field field-full recurring-field">
             <p class="hint" style="margin:0 0 12px;">This same amount will be logged once a month, starting on the Start/Due Date above, until the end month below.</p>
-            <div class="field" style="max-width:220px;">
+            <div class="field" style="max-width:260px;">
               <label style="font-size:12px;color:var(--text-muted);">Ends in (last month)</label>
               <div class="month-year-group">
                 <select id="txRecToMonth" class="my-month"></select>
                 <select id="txRecToYear" class="my-year"></select>
+                <button type="button" class="year-bump-btn" id="txRecYearBumpBtn" title="Move end date 1 year forward">+1 year</button>
               </div>
             </div>
             <p id="recurringSummary" class="hint" style="margin:12px 0 0;font-weight:600;color:var(--text);"></p>
@@ -679,6 +680,15 @@ function renderCadastroShell(){
   populateRecurringRangeSelects();
   ['txRecToMonth','txRecToYear'].forEach(id => {
     document.getElementById(id).addEventListener('change', updateRecurringSummary);
+  });
+  document.getElementById('txRecYearBumpBtn').addEventListener('click', () => {
+    const sel = document.getElementById('txRecToYear');
+    const options = [...sel.options].map(o => parseInt(o.value, 10));
+    const next = parseInt(sel.value, 10) + 1;
+    if(options.includes(next)){
+      sel.value = next;
+      updateRecurringSummary();
+    }
   });
   document.getElementById('txValor').addEventListener('input', updateRecurringSummary);
   document.getElementById('txData').addEventListener('change', updateRecurringSummary);
@@ -772,16 +782,9 @@ function renderRelatoriosShell(){
   const el = document.getElementById('tab-relatorios');
   el.innerHTML = `
     <div class="filters-bar">
-      <div class="period-tabs" id="periodTabs">
-        <button data-period="mensal" class="active" onclick="setPeriodFilter('mensal')">Monthly</button>
-        <button data-period="trimestral" onclick="setPeriodFilter('trimestral')">Quarterly</button>
-        <button data-period="semestral" onclick="setPeriodFilter('semestral')">Semi-annual</button>
-        <button data-period="anual" onclick="setPeriodFilter('anual')">Annual</button>
-        <button data-period="custom" onclick="setPeriodFilter('custom')">Custom Range</button>
-      </div>
-      <div class="field" id="refSelectWrap">
-        <label style="font-size:12px;color:var(--text-muted);">Reference</label>
-        <select id="refSelect" onchange="onRefChange()"></select>
+      <div class="field" id="periodSelectWrap">
+        <label style="font-size:12px;color:var(--text-muted);">Period</label>
+        <select id="periodSelect" onchange="onPeriodSelectChange()"></select>
       </div>
       <div class="custom-range-fields" id="customRangeFields" style="display:none;">
         <div class="field">
@@ -800,7 +803,10 @@ function renderRelatoriosShell(){
         </div>
         <button type="button" class="btn-secondary" id="applyCustomRangeBtn">Apply</button>
       </div>
-      <button type="button" class="btn-winter" id="winterBtn" title="Oct → Jun, off-season">❄️ Prepare for Winter</button>
+      <div class="quick-actions">
+        <button type="button" class="btn-winter" id="winterBtn" title="Oct (this year) → Jun (next year)">❄️ Prepare for Winter</button>
+        <button type="button" class="btn-dividends" id="dividendsBtn" title="Mar (this year) → Apr (next year)">💰 Dividends</button>
+      </div>
       <div class="export-btns">
         <button onclick="exportCSV()">⬇️ CSV</button>
         <button onclick="exportPDF()">📄 PDF</button>
@@ -825,29 +831,37 @@ function renderRelatoriosShell(){
       <div id="reportTxList"></div>
     </div>
   `;
-  populateRefSelect();
+  populatePeriodSelect();
   populateCustomRangeSelects();
 
   document.getElementById('applyCustomRangeBtn').addEventListener('click', applyCustomRange);
   document.getElementById('winterBtn').addEventListener('click', prepareForWinter);
+  document.getElementById('dividendsBtn').addEventListener('click', prepareDividends);
 }
 
-function setPeriodFilter(period){
-  currentPeriodFilter = period;
-  document.querySelectorAll('#periodTabs button').forEach(b => b.classList.toggle('active', b.dataset.period === period));
+function populatePeriodSelect(){
+  const sel = document.getElementById('periodSelect');
+  if(!sel) return;
+  sel.innerHTML = buildPeriodSelectHTML(false);
+  const now = new Date();
+  sel.value = `mensal|${now.getFullYear()}-${now.getMonth()}`;
+  onPeriodSelectChange();
+}
 
-  const refWrap = document.getElementById('refSelectWrap');
+function onPeriodSelectChange(){
+  const val = document.getElementById('periodSelect').value;
   const customFields = document.getElementById('customRangeFields');
 
-  if(period === 'custom'){
-    refWrap.style.display = 'none';
+  if(val === 'custom'){
     customFields.style.display = 'flex';
     applyCustomRange();
-  } else {
-    refWrap.style.display = 'flex';
-    customFields.style.display = 'none';
-    populateRefSelect();
+    return;
   }
+  customFields.style.display = 'none';
+  const [type, ref] = val.split('|');
+  currentPeriodFilter = type;
+  currentReportRange = computeRange(type, ref);
+  refreshReport();
 }
 
 // Populates the "From" / "To" month + year selects for custom range filtering
@@ -881,6 +895,53 @@ function populateCustomRangeSelects(){
 
 const MC_MONTHS_FULL = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
+// Builds the grouped <optgroup> options for the single combined period dropdown,
+// used both in the Reports tab and in the Account Detail view.
+function buildPeriodSelectHTML(includeAllTime){
+  const now = new Date();
+
+  const monthOpts = [];
+  for(let i=6;i>=-24;i--){
+    const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
+    monthOpts.push(`<option value="mensal|${d.getFullYear()}-${d.getMonth()}">${monthLabel(d.getFullYear(), d.getMonth())}</option>`);
+  }
+
+  const curQ = Math.floor(now.getMonth()/3);
+  const quarterOpts = [];
+  for(let i=4;i>=-8;i--){
+    let q = curQ-i, y = now.getFullYear();
+    while(q<0){ q+=4; y-=1; }
+    while(q>3){ q-=4; y+=1; }
+    quarterOpts.push(`<option value="trimestral|${y}-${q}">Q${q+1} ${y}</option>`);
+  }
+
+  const curS = Math.floor(now.getMonth()/6);
+  const halfOpts = [];
+  for(let i=2;i>=-4;i--){
+    let s = curS-i, y = now.getFullYear();
+    while(s<0){ s+=2; y-=1; }
+    while(s>1){ s-=2; y+=1; }
+    halfOpts.push(`<option value="semestral|${y}-${s}">H${s+1} ${y}</option>`);
+  }
+
+  const yearOpts = [];
+  for(let i=2;i>=-5;i--){
+    const y = now.getFullYear()-i;
+    yearOpts.push(`<option value="anual|${y}">Year ${y}</option>`);
+  }
+
+  return `
+    <optgroup label="Monthly">${monthOpts.join('')}</optgroup>
+    <optgroup label="Quarterly">${quarterOpts.join('')}</optgroup>
+    <optgroup label="Semi-annual">${halfOpts.join('')}</optgroup>
+    <optgroup label="Annual">${yearOpts.join('')}</optgroup>
+    <optgroup label="Other">
+      ${includeAllTime ? '<option value="all">All Time</option>' : ''}
+      <option value="custom">Custom Range…</option>
+    </optgroup>
+  `;
+}
+
 function applyCustomRange(){
   const fm = parseInt(document.getElementById('customFromMonth').value, 10);
   const fy = parseInt(document.getElementById('customFromYear').value, 10);
@@ -902,15 +963,13 @@ function applyCustomRange(){
   refreshReport();
 }
 
-// "Prepare for Winter" — shortcut for the off-season, October through June
+// "Prepare for Winter" — shortcut for the off-season: October (this year) through June (next year)
 function prepareForWinter(){
   const now = new Date();
-  // If we're currently past June, anchor the season starting this October;
-  // otherwise (Jan–Jun) we're likely still inside a season that started last October.
-  let startYear = now.getFullYear();
-  if(now.getMonth() < 9) startYear -= 1; // months are 0-indexed; Oct = 9
+  const startYear = now.getFullYear();
 
-  setPeriodFilter('custom');
+  document.getElementById('periodSelect').value = 'custom';
+  document.getElementById('customRangeFields').style.display = 'flex';
   document.getElementById('customFromMonth').value = 9;  // October
   document.getElementById('customFromYear').value = startYear;
   document.getElementById('customToMonth').value = 5;    // June
@@ -918,47 +977,18 @@ function prepareForWinter(){
   applyCustomRange();
 }
 
-// Gera opções de referência (ex: meses para "mensal", trimestres p/ "trimestral", etc.)
-function populateRefSelect(){
-  const sel = document.getElementById('refSelect');
+// "Dividends" — shortcut for March (this year) through April (next year)
+function prepareDividends(){
   const now = new Date();
-  const options = [];
+  const startYear = now.getFullYear();
 
-  if(currentPeriodFilter === 'mensal'){
-    for(let i=0;i<12;i++){
-      const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
-      options.push({value: `${d.getFullYear()}-${d.getMonth()}`, label: monthLabel(d.getFullYear(), d.getMonth())});
-    }
-  } else if(currentPeriodFilter === 'trimestral'){
-    const curQ = Math.floor(now.getMonth()/3);
-    for(let i=0;i<8;i++){
-      let q = curQ - i, y = now.getFullYear();
-      while(q < 0){ q += 4; y -= 1; }
-      options.push({value: `${y}-${q}`, label: `Q${q+1} ${y}`});
-    }
-  } else if(currentPeriodFilter === 'semestral'){
-    const curS = Math.floor(now.getMonth()/6);
-    for(let i=0;i<6;i++){
-      let s = curS - i, y = now.getFullYear();
-      while(s < 0){ s += 2; y -= 1; }
-      options.push({value: `${y}-${s}`, label: `H${s+1} ${y}`});
-    }
-  } else if(currentPeriodFilter === 'anual'){
-    for(let i=0;i<5;i++){
-      const y = now.getFullYear()-i;
-      options.push({value: `${y}`, label: `Year ${y}`});
-    }
-  }
-
-  sel.innerHTML = options.map(o => `<option value="${o.value}">${o.label}</option>`).join('');
-  onRefChange();
-}
-
-function onRefChange(){
-  const sel = document.getElementById('refSelect');
-  const val = sel.value;
-  currentReportRange = computeRange(currentPeriodFilter, val);
-  refreshReport();
+  document.getElementById('periodSelect').value = 'custom';
+  document.getElementById('customRangeFields').style.display = 'flex';
+  document.getElementById('customFromMonth').value = 2;  // March
+  document.getElementById('customFromYear').value = startYear;
+  document.getElementById('customToMonth').value = 3;    // April
+  document.getElementById('customToYear').value = startYear + 1;
+  applyCustomRange();
 }
 
 // Calcula início/fim do período atual + do período anterior equivalente
@@ -1209,8 +1239,9 @@ function renderContasShell(){
   const el = document.getElementById('tab-contas');
   el.innerHTML = `
     <div class="chart-card" style="margin-bottom:20px;">
-      <h3>🗂️ Accounts &amp; Categories</h3>
-      <p class="hint" style="margin-top:-6px;margin-bottom:16px;">Click a category to see its full detail — total amount, all entries and instalments, across all years.</p>
+      <h3>🗂️ Accounts Summary</h3>
+      <p class="hint" style="margin-top:-6px;margin-bottom:16px;">Sorted by highest spend. Click an account to see its full detail.</p>
+      <div id="accountsSummary"></div>
       <div id="accountsGrid" class="accounts-grid"></div>
     </div>
     <div id="accountDetail"></div>
@@ -1219,22 +1250,53 @@ function renderContasShell(){
 
 function refreshContas(){
   const grid = document.getElementById('accountsGrid');
+  const summaryEl = document.getElementById('accountsSummary');
   if(!grid) return;
 
   if(categories.length === 0){
     grid.innerHTML = `<div class="empty-state"><div class="icon">🏷️</div>No categories yet.</div>`;
+    if(summaryEl) summaryEl.innerHTML = '';
     return;
   }
 
-  grid.innerHTML = categories.map(cat => {
+  const withTotals = categories.map(cat => {
     const catTx = transactions.filter(t => t.categoryId === cat.id);
     const total = catTx.reduce((s,t) => s+t.valor, 0);
+    return { cat, total, count: catTx.length };
+  }).sort((a,b) => b.total - a.total); // highest spend first
+
+  const grandTotal = withTotals.reduce((s,c) => s+c.total, 0);
+  const maxTotal = withTotals.length ? withTotals[0].total : 0;
+  const topCat = withTotals[0];
+
+  if(summaryEl){
+    summaryEl.innerHTML = `
+      <div class="accounts-summary-strip">
+        <div class="summary-item">
+          <div class="summary-label">Total across all accounts</div>
+          <div class="summary-value">${formatCurrency(grandTotal)}</div>
+        </div>
+        <div class="summary-item">
+          <div class="summary-label">Top account</div>
+          <div class="summary-value" style="font-size:16px;">${topCat && topCat.total > 0 ? topCat.cat.icone+' '+topCat.cat.nome : '—'}</div>
+        </div>
+        <div class="summary-item">
+          <div class="summary-label">Accounts tracked</div>
+          <div class="summary-value">${withTotals.length}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  grid.innerHTML = withTotals.map(({cat, total, count}) => {
+    const pct = maxTotal > 0 ? Math.round((total/maxTotal)*100) : 0;
     return `
       <div class="account-card" style="border-left:4px solid ${cat.cor}" onclick="showAccountDetail('${cat.id}')">
         <div class="account-icon">${cat.icone}</div>
         <div class="account-name">${cat.nome}</div>
         <div class="account-total">${formatCurrency(total)}</div>
-        <div class="account-count">${catTx.length} entr${catTx.length===1?'y':'ies'}</div>
+        <div class="account-count">${count} entr${count===1?'y':'ies'}</div>
+        <div class="account-bar"><div class="account-bar-fill" style="width:${pct}%;background:${cat.cor}"></div></div>
       </div>
     `;
   }).join('');
@@ -1246,15 +1308,16 @@ function refreshContas(){
 }
 
 // Independent filter state for the Accounts tab detail view (separate from the Reports tab's state)
-let acctPeriodFilter = "mensal";
+let acctPeriodSelectValue = null; // e.g. 'mensal|2026-7', 'custom', or 'all'
 let acctReportRange = null;
+let acctCustomRange = null; // {fm,fy,tm,ty} — remembered so reopening "Custom" restores the same dates
 
 function showAccountDetail(categoryId){
   window.currentAccountDetailId = categoryId;
-  // reset to a sensible default each time a (possibly different) category is opened
-  if(!acctReportRange){
-    acctPeriodFilter = "mensal";
+  // reset to a sensible default only the first time a detail view is opened
+  if(acctPeriodSelectValue === null){
     const now = new Date();
+    acctPeriodSelectValue = `mensal|${now.getFullYear()}-${now.getMonth()}`;
     acctReportRange = computeRange('mensal', `${now.getFullYear()}-${now.getMonth()}`);
   }
   renderAccountDetailShell(categoryId);
@@ -1275,17 +1338,9 @@ function renderAccountDetailShell(categoryId){
       </div>
 
       <div class="filters-bar" style="margin-bottom:16px;">
-        <div class="period-tabs" id="acctPeriodTabs">
-          <button data-period="mensal" onclick="setAcctPeriodFilter('mensal')">Monthly</button>
-          <button data-period="trimestral" onclick="setAcctPeriodFilter('trimestral')">Quarterly</button>
-          <button data-period="semestral" onclick="setAcctPeriodFilter('semestral')">Semi-annual</button>
-          <button data-period="anual" onclick="setAcctPeriodFilter('anual')">Annual</button>
-          <button data-period="custom" onclick="setAcctPeriodFilter('custom')">Custom Range</button>
-          <button data-period="all" onclick="setAcctPeriodFilter('all')">All Time</button>
-        </div>
-        <div class="field" id="acctRefSelectWrap">
-          <label style="font-size:12px;color:var(--text-muted);">Reference</label>
-          <select id="acctRefSelect" onchange="onAcctRefChange()"></select>
+        <div class="field" id="acctPeriodSelectWrap">
+          <label style="font-size:12px;color:var(--text-muted);">Period</label>
+          <select id="acctPeriodSelect" onchange="onAcctPeriodSelectChange()"></select>
         </div>
         <div class="custom-range-fields" id="acctCustomRangeFields" style="display:none;">
           <div class="field">
@@ -1304,7 +1359,10 @@ function renderAccountDetailShell(categoryId){
           </div>
           <button type="button" class="btn-secondary" id="acctApplyCustomRangeBtn">Apply</button>
         </div>
-        <button type="button" class="btn-winter" id="acctWinterBtn" title="Oct → Jun, off-season">❄️ Prepare for Winter</button>
+        <div class="quick-actions">
+          <button type="button" class="btn-winter" id="acctWinterBtn" title="Oct (this year) → Jun (next year)">❄️ Prepare for Winter</button>
+          <button type="button" class="btn-dividends" id="acctDividendsBtn" title="Mar (this year) → Apr (next year)">💰 Dividends</button>
+        </div>
       </div>
 
       <div id="acctSeriesWrap"></div>
@@ -1312,86 +1370,56 @@ function renderAccountDetailShell(categoryId){
     </div>
   `;
 
-  document.querySelectorAll('#acctPeriodTabs button').forEach(b => b.classList.toggle('active', b.dataset.period === acctPeriodFilter));
-  populateAcctRefSelect();
+  populateAcctPeriodSelect();
   populateAcctCustomRangeSelects();
   renderAccountSeriesList(categoryId);
 
   document.getElementById('acctApplyCustomRangeBtn').addEventListener('click', applyAcctCustomRange);
   document.getElementById('acctWinterBtn').addEventListener('click', acctPrepareForWinter);
-
-  if(acctPeriodFilter === 'custom'){
-    document.getElementById('acctRefSelectWrap').style.display = 'none';
-    document.getElementById('acctCustomRangeFields').style.display = 'flex';
-  }
+  document.getElementById('acctDividendsBtn').addEventListener('click', acctPrepareDividends);
 
   renderAccountDetailList(categoryId);
 }
 
-function setAcctPeriodFilter(period){
-  acctPeriodFilter = period;
-  document.querySelectorAll('#acctPeriodTabs button').forEach(b => b.classList.toggle('active', b.dataset.period === period));
+function populateAcctPeriodSelect(){
+  const sel = document.getElementById('acctPeriodSelect');
+  if(!sel) return;
+  sel.innerHTML = buildPeriodSelectHTML(true);
+  sel.value = acctPeriodSelectValue;
 
-  const refWrap = document.getElementById('acctRefSelectWrap');
+  const customFields = document.getElementById('acctCustomRangeFields');
+  if(acctPeriodSelectValue === 'custom'){
+    customFields.style.display = 'flex';
+    if(acctCustomRange){
+      document.getElementById('acctCustomFromMonth').value = acctCustomRange.fm;
+      document.getElementById('acctCustomFromYear').value = acctCustomRange.fy;
+      document.getElementById('acctCustomToMonth').value = acctCustomRange.tm;
+      document.getElementById('acctCustomToYear').value = acctCustomRange.ty;
+    }
+  } else {
+    customFields.style.display = 'none';
+  }
+}
+
+function onAcctPeriodSelectChange(){
+  const val = document.getElementById('acctPeriodSelect').value;
+  acctPeriodSelectValue = val;
   const customFields = document.getElementById('acctCustomRangeFields');
 
-  if(period === 'all'){
-    refWrap.style.display = 'none';
+  if(val === 'all'){
     customFields.style.display = 'none';
     acctReportRange = null; // signal "no filter" — show everything
     renderAccountDetailList(window.currentAccountDetailId);
-  } else if(period === 'custom'){
-    refWrap.style.display = 'none';
+    return;
+  }
+  if(val === 'custom'){
     customFields.style.display = 'flex';
     applyAcctCustomRange();
-  } else {
-    refWrap.style.display = 'flex';
-    customFields.style.display = 'none';
-    populateAcctRefSelect();
+    return;
   }
-}
-
-function populateAcctRefSelect(){
-  const sel = document.getElementById('acctRefSelect');
-  if(!sel) return;
-  const now = new Date();
-  const options = [];
-
-  if(acctPeriodFilter === 'mensal'){
-    for(let i=-6;i<=60;i++){ // 6 months back, 5 years forward, so distant future entries are reachable
-      const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
-      options.push({value: `${d.getFullYear()}-${d.getMonth()}`, label: monthLabel(d.getFullYear(), d.getMonth())});
-    }
-  } else if(acctPeriodFilter === 'trimestral'){
-    const curQ = Math.floor(now.getMonth()/3);
-    for(let i=-4;i<=24;i++){
-      let q = curQ - i, y = now.getFullYear();
-      while(q < 0){ q += 4; y -= 1; }
-      while(q > 3){ q -= 4; y += 1; }
-      options.push({value: `${y}-${q}`, label: `Q${q+1} ${y}`});
-    }
-  } else if(acctPeriodFilter === 'semestral'){
-    const curS = Math.floor(now.getMonth()/6);
-    for(let i=-2;i<=16;i++){
-      let s = curS - i, y = now.getFullYear();
-      while(s < 0){ s += 2; y -= 1; }
-      while(s > 1){ s -= 2; y += 1; }
-      options.push({value: `${y}-${s}`, label: `H${s+1} ${y}`});
-    }
-  } else if(acctPeriodFilter === 'anual'){
-    for(let i=-2;i<=10;i++){
-      const y = now.getFullYear()-i;
-      options.push({value: `${y}`, label: `Year ${y}`});
-    }
-  }
-
-  sel.innerHTML = options.map(o => `<option value="${o.value}">${o.label}</option>`).join('');
-  onAcctRefChange();
-}
-
-function onAcctRefChange(){
-  const sel = document.getElementById('acctRefSelect');
-  acctReportRange = computeRange(acctPeriodFilter, sel.value);
+  customFields.style.display = 'none';
+  const [type, ref] = val.split('|');
+  acctReportRange = computeRange(type, ref);
   renderAccountDetailList(window.currentAccountDetailId);
 }
 
@@ -1425,6 +1453,8 @@ function applyAcctCustomRange(){
   const tm = parseInt(document.getElementById('acctCustomToMonth').value, 10);
   const ty = parseInt(document.getElementById('acctCustomToYear').value, 10);
 
+  acctCustomRange = { fm, fy, tm, ty };
+
   const start = new Date(fy, fm, 1);
   const end = new Date(ty, tm + 1, 0, 23, 59, 59);
   const label = `${monthLabel(fy, fm)} – ${monthLabel(ty, tm)}`;
@@ -1433,15 +1463,32 @@ function applyAcctCustomRange(){
   renderAccountDetailList(window.currentAccountDetailId);
 }
 
+// "Prepare for Winter" — shortcut for the off-season: October (this year) through June (next year)
 function acctPrepareForWinter(){
   const now = new Date();
-  let startYear = now.getFullYear();
-  if(now.getMonth() < 9) startYear -= 1;
+  const startYear = now.getFullYear();
 
-  setAcctPeriodFilter('custom');
-  document.getElementById('acctCustomFromMonth').value = 9;
+  document.getElementById('acctPeriodSelect').value = 'custom';
+  acctPeriodSelectValue = 'custom';
+  document.getElementById('acctCustomRangeFields').style.display = 'flex';
+  document.getElementById('acctCustomFromMonth').value = 9;  // October
   document.getElementById('acctCustomFromYear').value = startYear;
-  document.getElementById('acctCustomToMonth').value = 5;
+  document.getElementById('acctCustomToMonth').value = 5;    // June
+  document.getElementById('acctCustomToYear').value = startYear + 1;
+  applyAcctCustomRange();
+}
+
+// "Dividends" — shortcut for March (this year) through April (next year)
+function acctPrepareDividends(){
+  const now = new Date();
+  const startYear = now.getFullYear();
+
+  document.getElementById('acctPeriodSelect').value = 'custom';
+  acctPeriodSelectValue = 'custom';
+  document.getElementById('acctCustomRangeFields').style.display = 'flex';
+  document.getElementById('acctCustomFromMonth').value = 2;  // March
+  document.getElementById('acctCustomFromYear').value = startYear;
+  document.getElementById('acctCustomToMonth').value = 3;    // April
   document.getElementById('acctCustomToYear').value = startYear + 1;
   applyAcctCustomRange();
 }

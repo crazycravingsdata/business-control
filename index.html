@@ -200,14 +200,26 @@ main{padding:24px;max-width:1200px;margin:0 auto;}
 .period-tabs button.active{background:var(--primary);color:#fff;}
 
 .custom-range-fields{display:flex;gap:10px;align-items:flex-end;}
-.month-year-group{display:flex;gap:6px;}
+.month-year-group{display:flex;gap:6px;align-items:center;}
 .month-year-group .my-month{min-width:130px;}
 .month-year-group .my-year{min-width:85px;}
+.year-bump-btn{
+  padding:9px 10px;border-radius:8px;border:1px solid var(--border);
+  background:#f8fafc;font-size:12px;font-weight:700;color:var(--primary);cursor:pointer;
+  white-space:nowrap;
+}
+.year-bump-btn:hover{background:#eef2ff;}
+.quick-actions{display:flex;gap:8px;flex-wrap:wrap;}
 .btn-winter{
   padding:9px 16px;border-radius:8px;border:1px solid #93c5fd;background:#eff6ff;
   color:#1d4ed8;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;
 }
 .btn-winter:hover{background:#dbeafe;}
+.btn-dividends{
+  padding:9px 16px;border-radius:8px;border:1px solid #86efac;background:#f0fdf4;
+  color:#15803d;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;
+}
+.btn-dividends:hover{background:#dcfce7;}
 .export-btns{display:flex;gap:8px;margin-left:auto;}
 .export-btns button{
   padding:9px 16px;border-radius:8px;border:1px solid var(--border);
@@ -231,6 +243,13 @@ table.tx-table td.valor{font-weight:600;color:var(--danger);text-align:right;}
   border-radius:20px;font-size:12px;background:#f1f5f9;
 }
 .btn-del{background:none;border:none;color:var(--danger);cursor:pointer;font-size:15px;}
+.accounts-summary-strip{
+  display:flex;gap:28px;flex-wrap:wrap;padding:14px 18px;margin-bottom:18px;
+  background:#f8fafc;border-radius:10px;border:1px solid var(--border);
+}
+.summary-item{min-width:120px;}
+.summary-label{font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.03em;margin-bottom:3px;}
+.summary-value{font-size:20px;font-weight:700;color:var(--text);}
 .accounts-grid{
   display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;
 }
@@ -243,6 +262,8 @@ table.tx-table td.valor{font-weight:600;color:var(--danger);text-align:right;}
 .account-name{font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px;}
 .account-total{font-size:17px;font-weight:700;color:var(--danger);}
 .account-count{font-size:12px;color:var(--text-muted);margin-top:2px;}
+.account-bar{height:5px;border-radius:3px;background:#f1f5f9;margin-top:10px;overflow:hidden;}
+.account-bar-fill{height:100%;border-radius:3px;}
 .btn-edit{background:none;border:none;color:var(--primary);cursor:pointer;font-size:14px;margin-right:4px;}
 .modal-overlay{
   display:none;position:fixed;inset:0;background:rgba(15,23,42,.5);
